@@ -14,7 +14,7 @@ main.cpp
 fractal-serial.cpp
 palette.cpp
 fractal-simd.cpp
-fractal-simd.h)
+)
 
 target_link_libraries(fractal-julia PRIVATE 
     fmt::fmt
