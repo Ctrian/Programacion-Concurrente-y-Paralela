@@ -49,9 +49,8 @@ uint32_t acotado(std::complex<double> z0)
     // Se alcanzó el límite: no se detectó escape ANTES de ese límite.
     // No demuestra pertenencia al conjunto. Además, si escapa justo en la última
     // actualización, este código también llega aquí: no distingue ese caso.
-    // Se conserva el valor existente. No es blanco: en el entorno little-endian
-    // del proyecto sus bytes RGBA son FF 00 00 00 (rojo con alfa 0).
-    return 0X000000FF;
+    // Negro opaco, igual que en SIMD: bytes RGBA 00 00 00 FF en x86.
+    return 0xFF000000;
 }
 
 void julia_serial(

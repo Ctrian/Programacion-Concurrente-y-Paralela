@@ -89,7 +89,7 @@ main() reserva memoria para los píxeles
 ```cpp
 uint32_t* buffer = nullptr;
 // Dentro de main():
-buffer = new uint32_t[WIDTH * HEIGHT];
+buffer = new uint32_t[WIDTH * HEIGHT]{};
 ```
 
 `uint32_t` es un entero sin signo de 32 bits. Aquí cada elemento guarda los cuatro bytes de un píxel.
@@ -168,7 +168,7 @@ window.draw(text);
 window.display();
 ```
 
-Dentro de `while (window.isOpen())`, también procesa eventos, recalcula el fractal, actualiza la textura y mide los FPS. En el código actual se hace además un cálculo inicial antes de entrar al bucle.
+Dentro de `while (window.isOpen())`, también procesa eventos, recalcula el fractal, actualiza la textura y mide los FPS. El buffer se inicializa a cero antes de copiarlo por primera vez a la textura.
 
 ## 5. La otra conexión: `extern`
 
@@ -213,10 +213,12 @@ Tu `CMakeLists.txt` contiene:
 add_executable(fractal-julia
     main.cpp
     fractal-serial.cpp
+    fractal-simd.cpp
+    palette.cpp
 )
 ```
 
-Eso indica que ambos archivos forman parte del ejecutable. De forma simplificada:
+Eso indica que los cuatro archivos forman parte del ejecutable. Para la llamada serial, el enlace se puede resumir así:
 
 ```text
 main.cpp + encabezados            → código objeto de main
@@ -245,19 +247,19 @@ El archivo también enlaza las bibliotecas de SFML y `fmt`. Para este proyecto s
 
 ### Memoria: un detalle del ejemplo actual
 
-C++ no tiene el recolector de basura automático de Java para estas reservas. El arreglo creado con `new[]` debería liberarse con:
+C++ no tiene el recolector de basura automático de Java para estas reservas. El arreglo creado con `new[]` se libera con:
 
 ```cpp
 delete[] buffer;
 ```
 
-cuando termine su uso, después del bucle y antes de salir de `main`. El código actual no lo hace. En C++ moderno suele preferirse un contenedor como `std::vector<uint32_t>`, que libera su almacenamiento automáticamente. Esta guía no modifica el código del ejemplo.
+después del bucle y antes de salir de `main`. En C++ moderno suele preferirse un contenedor como `std::vector<uint32_t>`, que libera su almacenamiento automáticamente. Esta guía no modifica el código del ejemplo.
 
 Los objetos locales como `texture`, `sprite` y `window` sí tienen destrucción automática al salir de su ámbito. No todo objeto C++ requiere `new` o `delete`.
 
 ### Colores: cuidado con los comentarios
 
-En `acotado`, los comentarios llaman «ROJO» a `0xFFFFFFFF` y «BLANCO» a `0x000000FF`. No son una descripción fiable: SFML recibe bytes RGBA, y el orden en memoria de un entero depende de la plataforma. `0xFFFFFFFF` representa cuatro bytes a 255, es decir, blanco opaco. Para interpretar el otro valor hay que considerar el orden de bytes. No memorices los comentarios como regla de colores.
+SFML recibe bytes RGBA, y el orden en memoria de un entero depende de la plataforma. En x86, `0xFF000000` representa negro opaco: bytes `00 00 00 FF`. Ambos modos usan este valor al alcanzar el límite y `color_ramp[iter % PALETTE_SIZE]` para el escape. La paleta intercambia el orden de bytes con `bswap32` para entregar RGBA a SFML.
 
 ## 9. La matemática del fractal, paso a paso
 
@@ -456,9 +458,9 @@ La función asigna el color así:
 
 ```cpp
 if (iter < max_iteraciones)
-    return 0xFFFFFFFF;
+    return color_ramp[iter % PALETTE_SIZE];
 
-return 0x000000FF;
+return 0xFF000000;
 ```
 
 Interprétalo como «escape detectado antes del límite» frente a «límite alcanzado». Hay dos detalles para leer el código con precisión:
@@ -477,7 +479,7 @@ Con precisión matemática:
 - El **conjunto de Julia lleno** contiene los puntos iniciales cuyas sucesiones permanecen acotadas.
 - El **conjunto de Julia** es la frontera de ese conjunto lleno.
 
-Este programa aproxima la separación mediante dos colores y un límite de iteraciones. No calcula una fórmula explícita para la frontera.
+Este programa aproxima la separación mediante una paleta para el escape, negro para los puntos que alcanzan el límite y un presupuesto finito de iteraciones. No calcula una fórmula explícita para la frontera.
 
 Una distinción útil: en este ejemplo de **Julia**, `c` es fijo y varía `z₀` entre píxeles. En el conjunto de **Mandelbrot**, se suele fijar `z₀ = 0` y variar `c` entre píxeles. La fórmula iterada puede ser la misma; cambia qué representa cada píxel.
 
@@ -519,6 +521,42 @@ píxel (columna, fila)
 2. `fractal-serial.cpp` contiene su implementación y la función auxiliar `acotado`.
 3. `main.cpp` reserva el buffer, pide el cálculo y muestra el resultado con SFML.
 4. La función modifica la memoria recibida mediante el puntero; por eso puede retornar `void` y aun así producir la imagen.
-5. CMake incluye ambos `.cpp`; el enlazador conecta las llamadas con sus definiciones.
+5. CMake incluye los archivos `.cpp` del cálculo y de la paleta; el enlazador conecta las llamadas con sus definiciones.
 6. `extern` permite usar la variable global definida en otro archivo.
 7. Las guardas del encabezado evitan inclusiones repetidas, no llamadas repetidas.
+
+## 11. Versión SIMD con AVX2
+
+`fractal-simd.cpp` implementa `julia_simd` con ocho `float` por vector. Cada
+carril representa una fila distinta de la misma columna: el bucle avanza `j += 8`.
+Los vectores real e imaginario se mantienen separados. Una máscara conserva los
+carriles activos y los contadores enteros solo avanzan para esos píxeles.
+
+Se comprueba `x*x + y*y < 4` antes de actualizar, con contadores inicializados en
+1, siguiendo la convención serial. Los carriles que escapan permanecen inactivos.
+El último grupo solo escribe las filas válidas si la altura no es múltiplo de ocho.
+Ambos modos usan la paleta para el escape y negro opaco al alcanzar el límite.
+En x86, el entero `0xFF000000` tiene bytes RGBA `00 00 00 FF`.
+
+La versión serial usa `double` y SIMD usa `float`: pueden aparecer diferencias de
+color cerca de la frontera o al hacer mucho zoom. SIMD comparte mediante `extern`
+la única definición de `c` que existe en `fractal-serial.cpp`; no duplica `acotado`.
+
+CMake aplica `-mavx2` (o `/arch:AVX2` en MSVC) solo a `fractal-simd.cpp`.
+El modo SIMD y las pruebas requieren un procesador x86 con AVX2; no hay detección
+automática ni selección de una alternativa para CPU sin AVX2.
+
+En la ventana, `1` selecciona Serial y `3` selecciona SIMD. Up/Down ajustan el
+límite en pasos de diez, con mínimo diez. El texto muestra modo, límite y FPS;
+los FPS miden el ciclo completo de renderizado, no únicamente el cálculo.
+
+Con las dependencias y el toolchain ya configurados:
+
+```bash
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+`fractal-test` contrasta SIMD con una referencia escalar en `float`, comprueba
+alturas incompletas, el radio de escape y límites de iteración, y compara ambos
+modos sobre coordenadas exactamente representables. Las pruebas no abren ventanas.

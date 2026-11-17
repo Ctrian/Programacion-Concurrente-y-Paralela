@@ -1,17 +1,14 @@
-#include <iostream>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
-#include <SFML/Audio.hpp>
 #include <SFML/Graphics.hpp>
 
 #include "fractal-serial.h"
-
-#include <complex>
-#include <cmath>
-#include <cstring>
-
 #include "fractal-simd.h"
+
+#include <algorithm>
+#include <limits>
+#include <string>
 
 // Ejes en coordenadas x,y
 double x_min = -1.5;
@@ -20,7 +17,6 @@ double y_min = -1.5;
 double y_max = 1.5;
 
 int max_iteraciones = 10;
-extern std::complex<double> c;
 
 #define WIDTH 1600
 #define HEIGHT 900
@@ -30,16 +26,16 @@ uint32_t *buffer = nullptr;
 
 enum class runtime_type
 {
-    SERIAL_1,
+    SERIAL_I,
     SIMD
 };
 
 int main()
 {
 
-    buffer = new uint32_t[WIDTH * HEIGHT];
+    buffer = new uint32_t[WIDTH * HEIGHT]{};
 
-    runtime_type r_type = runtime_type::SERIAL_1;
+    runtime_type r_type = runtime_type::SERIAL_I;
 
     // Create the main window
     sf::RenderWindow window(sf::VideoMode({WIDTH, HEIGHT}), "Dibujo funcion");
@@ -48,19 +44,16 @@ int main()
     // configuracion texto Fps e iteraciones
     sf::Font font("arial.TTF");
     sf::Text text(font, "Fractal", 24);
-    text.setFillColor(sf::Color::Black);
+    text.setFillColor(sf::Color::White);
     text.setPosition({10, 10});
     text.setStyle(sf::Text::Bold);
 
     // configuracion texto inferior
     std::string options = "[1] Serial |[3] SIMD | Up/Down: Iterations";
     sf::Text text_options(font, options, 20);
-    text_options.setFillColor(sf::Color::Blue);
+    text_options.setFillColor(sf::Color::White);
     text_options.setPosition({10, window.getView().getSize().y - 40});
-    text.setStyle(sf::Text::Bold);
-
-    // dibujar(); configurar textura inicial
-    // julia_serial(x_min, y_min, x_max, y_max, WIDTH, HEIGHT, buffer);
+    text_options.setStyle(sf::Text::Bold);
 
     // Load a sprite to display
     sf::Texture texture({WIDTH, HEIGHT});
@@ -89,43 +82,38 @@ int main()
                 switch (evt->scancode)
                 {
                 case sf::Keyboard::Scan::Up:
-                    max_iteraciones += 10;
+                    if (max_iteraciones <= std::numeric_limits<int>::max() - 10)
+                        max_iteraciones += 10;
                     break;
                 case sf::Keyboard::Scan::Down:
-                    max_iteraciones -= 10;
+                    // Mantener un presupuesto positivo al pulsar Down.
+                    max_iteraciones = std::max(10, max_iteraciones - 10);
                     break;
                 case sf::Keyboard::Scan::Num1:
-                    r_type = runtime_type::SERIAL_1;
+                    r_type = runtime_type::SERIAL_I;
                     break;
                 case sf::Keyboard::Scan::Num3:
                     r_type = runtime_type::SIMD;
                     break;
                 }
-                // poner 0 en la imagen
-                std::memset(buffer, 0, WIDTH * HEIGHT * sizeof(uint32_t));
             }
         }
-        // diibujar fractal
-        // julia_serial(x_min, y_min, x_max, y_max, WIDTH, HEIGHT, buffer);
+        if (!window.isOpen())
+            break;
 
-        std::string mode = "";
+        // Cada modo escribe todos los píxeles antes de actualizar la textura.
 
-        if (r_type == runtime_type::SERIAL_1)
+        if (r_type == runtime_type::SERIAL_I)
         {
-            mode = "Julia SERIAL_1";
             julia_serial(x_min, y_min, x_max, y_max, WIDTH, HEIGHT, buffer);
         }
         else if (r_type == runtime_type::SIMD)
         {
-            mode = "Julia SIMD";
             julia_simd(x_min, y_min, x_max, y_max, WIDTH, HEIGHT, buffer);
         }
         texture.update((const uint8_t *)buffer);
 
-        // std::cout<<"dibujando"<<std::endl;
-        // std::cout.flush();
-
-        // medir los fps
+        // FPS del ciclo completo: cálculo, textura, texto y dibujo.
         frames++;
 
         if (clock.getElapsedTime().asSeconds() >= 1.0f)
@@ -135,10 +123,10 @@ int main()
             clock.restart();
         }
 
-        std::cout << "FPS: " << fps << std::endl;
-
         // actualizar los textos
-        auto msg = fmt::format("Fractal {} - Iteraciones: {}", mode, max_iteraciones);
+        auto msg = fmt::format("Fractal: {} | Iteraciones: {} | FPS: {}",
+            r_type == runtime_type::SERIAL_I ? "SERIAL_I" : "SIMD",
+            max_iteraciones, fps);
 
         text.setString(msg);
 
@@ -158,5 +146,6 @@ int main()
         window.display();
     }
 
+    delete[] buffer;
     return 0;
 }
