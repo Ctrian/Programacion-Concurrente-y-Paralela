@@ -3,6 +3,8 @@
 //Generador de paletas
 // https://rampgenerator.com/
 
+// Invierte los cuatro bytes: el literal 0xRRGGBBAA queda almacenado
+// como bytes RR GG BB AA en x86 little-endian, que es lo que espera SFML.
 uint32_t bswap32(uint32_t a){
     return  ((a & 0x000000FF) << 24)|
             ((a & 0x0000FF00) << 8) |
@@ -10,6 +12,8 @@ uint32_t bswap32(uint32_t a){
             ((a & 0xFF000000) >> 24);
 }
 
+// Los modos de cálculo eligen un color con iter % PALETTE_SIZE.
+// El último byte de cada literal es FF: alfa completamente opaco.
 std::vector<uint32_t> color_ramp ={
     bswap32(0xFF1010FF), 
     bswap32(0xEF1019FF),
