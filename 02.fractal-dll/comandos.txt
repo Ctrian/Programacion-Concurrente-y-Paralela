@@ -1,0 +1,4 @@
+# Ejecutar desde el directorio que contiene la biblioteca compilada.
+# nm -D lista los símbolos dinámicos; grep filtra el nombre de la interfaz.
+# Se espera el símbolo julia_simd sin decoración de nombres C++.
+nm -D libfractal-julia.so | grep julia_simd
